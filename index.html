@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mon Bot Discord</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0f1117;
+    color: #e6e8ee;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .card {
+    background: #171a21;
+    border: 1px solid #262b36;
+    border-radius: 16px;
+    padding: 40px;
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+
+  h1 {
+    font-size: 24px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #5865f2;
+    box-shadow: 0 0 12px #5865f2;
+  }
+
+  .sub {
+    color: #8b93a7;
+    font-size: 14px;
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #b6bdcc;
+    margin-bottom: 8px;
+  }
+
+  input {
+    width: 100%;
+    padding: 13px 14px;
+    background: #0f1117;
+    border: 1px solid #2c313d;
+    border-radius: 10px;
+    color: #e6e8ee;
+    font-size: 14px;
+    font-family: ui-monospace, monospace;
+    outline: none;
+    transition: border-color .15s;
+  }
+
+  input:focus { border-color: #5865f2; }
+
+  button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 14px;
+    background: #5865f2;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+  }
+
+  button:hover { background: #4752c4; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .warn {
+    margin-top: 22px;
+    padding: 14px 16px;
+    background: rgba(240, 177, 50, .08);
+    border: 1px solid rgba(240, 177, 50, .25);
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #d9b46a;
+  }
+
+  .warn b { color: #f0b132; }
+
+  .log {
+    margin-top: 20px;
+    background: #0f1117;
+    border: 1px solid #2c313d;
+    border-radius: 10px;
+    padding: 14px;
+    font-family: ui-monospace, monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #8b93a7;
+    max-height: 180px;
+    overflow-y: auto;
+    display: none;
+    white-space: pre-wrap;
+  }
+
+  .log.show { display: block; }
+  .log .ok { color: #3ba55d; }
+  .log .err { color: #ed4245; }
+
+  code {
+    background: #0f1117;
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-size: 12.5px;
+    color: #a5b3ff;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1><span class="dot"></span>Mon Bot Discord</h1>
+  <p class="sub">
+    Colle le token de ton bot pour le connecter.<br>
+    Tape ensuite <code>!help</code> sur Discord.
+  </p>
+
+  <label for="token">Token du bot</label>
+  <input
+    type="password"
+    id="token"
+    placeholder="MTIzNDU2Nzg5... (token Discord)"
+    autocomplete="off"
+    spellcheck="false"
+  >
+
+  <button id="start">Démarrer le bot</button>
+
+  <div class="log" id="log"></div>
+
+  <div class="warn">
+    <b>⚠️ Important :</b> ce code tourne dans le navigateur. Le token est donc
+    visible par quiconque ouvre les DevTools, et le bot s'arrête dès que tu
+    fermes l'onglet. Pour un vrai bot 24/7, utilise un serveur (Railway,
+    Render, VPS) ou une fonction Vercel Edge.
+  </div>
+</div>
+
+<script>
+/* ------------------------------------------------------------------
+   Connexion au Gateway Discord depuis le navigateur
+   ⚠️ Non recommandé en production (expose le token côté client)
+------------------------------------------------------------------ */
+
+const GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
+
+const logEl    = document.getElementById('log');
+const tokenEl  = document.getElementById('token');
+const startBtn = document.getElementById('start');
+
+let ws = null;
+let heartbeat = null;
+let sequence = null;
+
+function log(msg, cls = '') {
+  logEl.classList.add('show');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function send(op, d) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ op, d }));
+  }
+}
+
+function startBot(token) {
+  logEl.innerHTML = '';
+  logEl.classList.add('show');
+  log('Connexion au gateway...');
+
+  ws = new WebSocket(GATEWAY_URL);
+
+  ws.onopen = () => log('WebSocket ouvert.', 'ok');
+
+  ws.onmessage = (event) => {
+    const { op, d, s } = JSON.parse(event.data);
+    if (s) sequence = s;
+
+    switch (op) {
+      // Hello → on démarre le heartbeat + identify
+      case 10:
+        log(`Hello reçu (heartbeat: ${d.heartbeat_interval}ms)`);
+        clearInterval(heartbeat);
+        heartbeat = setInterval(() => send(1, sequence), d.heartbeat_interval);
+
+        send(2, {
+          token,
+          intents: 1 | 512 | 32768, // GUILDS | GUILD_MESSAGES | MESSAGE_CONTENT
+          properties: { os: 'browser', browser: 'web', device: 'web' }
+        });
+        break;
+
+      // ACK du heartbeat
+      case 11:
+        break;
+
+      // Dispatch
+      case 0:
+        if (d.t === 'READY') {
+          log(`Connecté en tant que ${d.user.username}#${d.user.discriminator}`, 'ok');
+          startBtn.disabled = false;
+          startBtn.textContent = 'Bot en ligne ✅';
+        }
+
+        if (d.t === 'MESSAGE_CREATE') {
+          const msg = d.d;
+          if (msg.author.bot) break;
+
+          log(`Message reçu : "${msg.content}"`);
+
+          if (msg.content.trim() === '!help') {
+            fetch(`https://discord.com/api/v10/channels/${msg.channel_id}/messages`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bot ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                content: 'yes',
+                message_reference: { message_id: msg.id }
+              })
+            })
+            .then(r => {
+              if (r.ok) log('→ Réponse "yes" envoyée ✅', 'ok');
+              else log(`→ Erreur envoi (${r.status})`, 'err');
+            })
+            .catch(e => log(`→ Erreur : ${e.message}`, 'err'));
+          }
+        }
+        break;
+    }
+  };
+
+  ws.onerror = () => log('Erreur WebSocket (token invalide ?)', 'err');
+
+  ws.onclose = (e) => {
+    clearInterval(heartbeat);
+    log(`Connexion fermée (code ${e.code}).`, 'err');
+    startBtn.disabled = false;
+    startBtn.textContent = 'Démarrer le bot';
+  };
+}
+
+startBtn.addEventListener('click', () => {
+  const token = tokenEl.value.trim();
+  if (!token) {
+    logEl.classList.add('show');
+    log('Merci de coller un token.', 'err');
+    return;
+  }
+
+  startBtn.disabled = true;
+  startBtn.textContent = 'Connexion...';
+  startBot(token);
+});
+</script>
+
+</body>
+</html>
